@@ -1,0 +1,493 @@
+---
+title: "TP1_RodriguezAlejandro"
+author: "Rodriguez Alejandro Edgar"
+date: '2022-05-14'
+output:
+  html_document:
+    toc: yes
+    toc_float: yes
+    df_print: paged
+  html_notebook:
+    theme: spacelab
+    toc: yes
+    toc_float: yes
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(message = FALSE)
+knitr::opts_chunk$set(warning = FALSE)
+library("readxl")
+library("dplyr")
+library("tidyverse")
+library("moments")
+library("arules")
+library("plotrix")
+library("RVAideMemoire")# Paquete que contiene funciones misceláneas útiles en bioestadística
+library("car")
+library("pgirmess")
+library("gsheet")
+```
+
+```{r theme general}
+theme <- theme(text = element_text(size=10),
+               plot.title = element_text(size = 12, face = "bold.italic", hjust = 0.5), 
+               axis.title.x = element_text(size = 10, face="bold", colour='black'),         
+               axis.title.y = element_text(size = 10, face="bold"),
+               panel.border = element_blank(),
+               panel.grid.major = element_blank(),
+               panel.grid.minor = element_blank(), 
+               legend.title = element_text(face="bold"))
+```
+#### 
+# Trabajo Práctico N° 1
+
+El trabajo práctico comenzó con la generación de una muestra aleatoria estratificada y balanceada por variedad de vino de tamaño n = 2000, utilizando como semilla los últimos tres dígitos de mi DNI (907).
+Para realizar el estratificado, se utilizo el comando group_by por variedad y luego con sample_n se seleccionaron 1000 datos de cada variedad, por lo que al tener 2 variedades (blanco y tinto), se obtuvo un total de 2000 datos.
+
+## Importación de los datos
+[Datos TP1](https://docs.google.com/spreadsheets/d/1iNNtiudSM-N1x7UQsO0T0fbRu-bNjMVZVYOmI1C9kcE)
+```{r data, warning=FALSE, message=F, warn.conflicts=FALSE}
+url_datos <- 'https://docs.google.com/spreadsheets/d/1iNNtiudSM-N1x7UQsO0T0fbRu-bNjMVZVYOmI1C9kcE'
+datosTP1 = read.csv(text=gsheet2text(url_datos, format='csv'))
+df_DatosTP1 = data.frame(datosTP1)
+```
+
+## Muestra aleatoria estratificada y balanceada
+```{r}
+# Seteo la semilla con los últimos 3 dígitos de mi documento
+set.seed(907)
+
+stratified_df = df_DatosTP1 %>%
+  group_by(variedad) %>%
+  sample_n(1000, replace=FALSE)
+
+summary(stratified_df)
+str(stratified_df)
+```
+
+## Análisis estadístico de las variables por variedad
+Una vez generado el data frame con el que vamos a trabajar, se procedió a realizar un análisis estadístico de cada una de las variables numéricas para cada variedad de vino. Para esto, se generó una lista con las variables numéricas, excluyendo calidad y variedad y luego se procesaron para obtener las siguientas medidas: cantidad de datos, mínimo, máximo, media, mediana, moda, varianza, desviación estándar, coeficiente de variación, cuartil 1, cuartil 3, rango intercuartílico, MAD, asimetría, curtosis.
+
+Para la obtención de la moda, se realizó una función propia, donde se obtienen los valores únicos de la variable, se los ordena por frecuencia y se obtiene la que mayor frecuencia presenta.
+
+```{r}
+numeric_fields = c('acidez.fija','acidez.volátil','ácido.cítrico','azúcar.residual','cloruros','anhídrido.sulfuroso.libre','anhídrido.sulfuroso.total','densidad','pH','sulfatos','alcohol')
+
+# Obtengo los subsets de cada variedad
+variedad_blanco_df = stratified_df[stratified_df$variedad == 1,]
+variedad_tinto_df = stratified_df[stratified_df$variedad == 2,]
+
+# Función para obtener la moda de la variable
+get_mode <- function(v) {
+  uniqv = unique(v)
+  count = table(v)
+  mode = count[order(-count)][1]
+  as.double(names(mode))
+}
+
+get_numeric_variables_attrs <- function(df, numeric_fields) {
+  sd_df = apply(df, 2, sd)
+  var_df = apply(df, 2, var)
+  mad_df = apply(df, 2, mad)
+  # https://es.acervolima.com/asimetria-y-curtosis-en-la-programacion-r/
+  asimetria_df = apply(df,2, skewness)
+  curtosis_df = apply(df,2, kurtosis)
+
+  results = c()
+  for (i in numeric_fields){
+    columns = c("mode", "var", "sd", "mad", "asimetria", "curtosis")
+    values = c(get_mode(df[i]), as.numeric(var_df[i]), as.numeric(sd_df[i]), as.numeric(mad_df[i]), as.numeric(asimetria_df[i]), as.numeric(curtosis_df[i]))
+  
+    # Aprovecho los valores que genera summary
+    for (s in summary(df[i])) {
+      splited = str_split(s, ":", simplify = TRUE)
+      columns = c(columns, str_trim(splited[1,1]))
+      values = c(values, as.double(str_trim(splited[1,2])))
+    }
+   
+    results = rbind(results, values)
+  }
+  
+  # Convierto la matriz a un data frame
+  results_df = data.frame(results)
+  
+  # Asigno los nombres de las dimensiones al data frame resultante
+  colnames(results_df) = columns
+  rownames(results_df) = numeric_fields
+  
+  # Calculo las medidas dependientes de otros valores
+  results_df$rango.intercuartil = results_df$`3rd Qu.` - results_df$`1st Qu.`
+  results_df$coef.variacion = results_df$sd / results_df$Mean * 100
+
+  results_df
+}
+```
+
+### Resultados de la variedad 1 (blanco)
+```{r}
+# Calculo los valores para variedad 1 (blanco)
+results_blanco_df = get_numeric_variables_attrs(variedad_blanco_df, numeric_fields)
+results_blanco_df
+sum(is.na(results_blanco_df))
+```
+
+### Resultados de la variedad 2 (tinto)
+```{r}
+# Calculo los valores para variedad 2 (tinto)
+results_tinto_df = get_numeric_variables_attrs(variedad_tinto_df, numeric_fields)
+results_tinto_df
+sum(is.na(results_tinto_df))
+```
+
+## Análisis gráfico de las variables
+### Calidad por variedad de vino
+Se elegió un gráfico de mosaicos para visualizar la relación y proporción de la distribución de la calidad del vino dependiendo de la variedad. A simple vista, se observa que el vino blanco tiene mayor proporción en las calidades más altas.
+```{r}
+mosaicplot(table(stratified_df$calidad,stratified_df$variedad),col=terrain.colors(7:11),main="Calidad de vinos por variedad",ylab="Variedad (blanco 1 / tinto 2)",xlab="Calidad (0 - muy malo y 10 - excelente)")
+```
+
+### Alcohol
+Se utilizaron boxplots para observar el comportamiento de las graduaciones de alcohol, tanto por variedad como por calidad. Comparando las distribuciones por variedad, se observan posibles outliers en los vinos tintos, pero no se observa una diferencia significativa en las medias y varianzas. En cambio, al comparar la distribución por calidad, se observa un aumento considerable en las medias a medida que la calidad aumenta, principalmente en los vinos de calidad media/alta.
+```{r}
+with(stratified_df,boxplot(alcohol~variedad,boxcol=topo.colors(5),col=terrain.colors(5),main="Distribución de alcohol por variedad",xlab="Variedad (blanco 1 / tinto 2)"))
+with(stratified_df,boxplot(alcohol~calidad,boxcol=topo.colors(9),col=terrain.colors(9),main="Distribución de alcohol por calidad",xlab="Calidad (0 - muy malo y 10 - excelente)",ylab="Graduación alcohólica"))
+```
+
+### Azúcar residual
+Se utilizó un boxplot para observar la concentración de azúcar residual entre la variedad de vinos blancos y tintos, esperando observar valores más altos en los vinos blancos, que suelen tener la característica de ser vinos dulces y se obtuvieron resultados acordes a lo esperado. Se observa una media y valores mucho más altos. En cambio, para los vinos tintos, parecen ser valors atípicos e incluso outliers.
+```{r}
+with(stratified_df,boxplot(azúcar.residual~variedad,boxcol=topo.colors(5),col=terrain.colors(5),main="Azúcar residual por variedad",xlab="Variedad (blanco 1 / tinto 2)"),ylab="Azúcar residual")
+```
+
+### pH
+Se utilizó un histograma para ver la distribución de los valores del pH. Al ser una variable continua y de rango acotado, se intentó verificar si la distribución tiene una forma reconocible. En este caso parecen dibujar una distribución normal, con media 3.25
+```{r}
+hist(stratified_df$pH, main="Distribución del pH", xlab="pH")
+```
+
+### Densidad
+Para la densidad, se tomó el mismo criterio que para el pH. En este caso se observa que la distribución tiene asímetria a izquierda.
+```{r}
+hist(stratified_df$densidad, main="Distribución de la densidad", xlab="Densidad")
+```
+
+### Cloruros
+Para las cloruros, se tomó el mismo criterio que para el pH. En este caso se observa que la distribución tiene mucha asímetria a izquierda, donde prácticamente los valores mayores a 0.2 se pueden considerar atípicos.
+```{r}
+hist(stratified_df$cloruros, main="Distribución de cloruros", xlab="Cloruros")
+```
+
+
+### Anhídrido sulfuroso
+Para este caso, se graficaron 2 variables, ya que se intentó visualizar la relación entre el anhídrido sulfuroso libre y total, para ver si existe una diferencia notable. Si bien ambas variables parten del mismo elemento, la variable libre tiene valores mucho más concentrados y bajos, mientras que la total muestra un rango más amplio y pocos valores fuera del rango intercuartil.
+```{r}
+boxplot(stratified_df[c('anhídrido.sulfuroso.libre','anhídrido.sulfuroso.total')])
+```
+
+### Acidez
+En el primer gráfico se compara la distribución de la acidez fija y la volátil, observando valores muy diferentes, sin embargo, al compararlos por variedad, se observa que tienen un comportamiento similar.
+```{r}
+with(stratified_df,boxplot(acidez.fija,acidez.volátil,boxcol=topo.colors(10),col=terrain.colors(10),main="Acidez",xlab="Fija    -    Volátil"))
+
+with(stratified_df,boxplot(acidez.fija~variedad,boxcol=topo.colors(10),col=terrain.colors(10),main="Acidez fija por variedad"))
+
+with(stratified_df,boxplot(acidez.volátil~variedad,boxcol=topo.colors(10),col=terrain.colors(10),main="Acidez volátil por variedad"))
+```
+
+### Ácido cítrico
+Con esta variable se intentó observar si la presencia del ácido cítrico predomina en los vinos tintos y se logró comprobar la premisa.
+```{r}
+with(stratified_df,boxplot(ácido.cítrico~variedad,boxcol=topo.colors(4),col=terrain.colors(4),main="Distribución de ácido cítrico por variedad",xlab="Variedad (blanco 1 / tinto 2)"))
+```
+
+## Análisis de la relación entre la calidad y la variedad
+### Tabla de frecuencia
+```{r}
+frec.variedad.calidad = table(stratified_df$variedad,stratified_df$calidad)
+frec.variedad.calidad
+```
+
+### Distribución
+```{r}
+barplot(table(stratified_df$variedad,stratified_df$calidad),col=rainbow(11),main="Distribución de calidad según la variedad")
+legend("topright",cex=1,title="Variedad",c("blanco","tinto"),fill=rainbow(11),horiz=T)
+
+mosaicplot(table(stratified_df$calidad,stratified_df$variedad),col=terrain.colors(7:11),main="Calidad de vinos por variedad",ylab="Variedad (blanco 1 / tinto 2)",xlab="Calidad (0 - muy malo y 10 - excelente)")
+```
+
+### Proporciones
+```{r}
+interior<-stratified_df%>%group_by(.dots=c("calidad"))%>%tally( )%>%mutate(porcent_abs=round(n/sum(n)*100,2)) # Produce tabla del sector interior
+
+exterior<-stratified_df%>%group_by(.dots=c("calidad","variedad"))%>%
+  tally( )%>%mutate(porcent_rel=round(n/sum(n)*100,2))%>%
+  ungroup( )%>%
+  mutate(porcent_abs=round(n/sum(n)*100,2))# Produce tabla del sector exterior
+porcent_abs_ext=exterior$porcent_abs
+tabla=table(exterior$calidad)[order(unique(exterior$calidad))]
+
+#Establece los colores
+colores=c("palegreen4","paleturquoise4","palevioletred4","salmon3")
+col_int=rep_len(colores,length(stratified_df$calidad))
+col_ext=lapply(Map(rep,colores[seq_along(tabla)],tabla),
+               function(porcent_abs_ext){
+                 al<-head(seq(0,1,length.out=length(porcent_abs_ext)+2L)[-1L],-1L)
+                 Vectorize(adjustcolor)(porcent_abs_ext,alpha.f=al) } )
+
+# Borra gráficos anteriores
+plot.new()
+
+# Produce los diagramas de tortas
+torta_ext= floating.pie(0.5,0.5,exterior$porcent_abs , radius =0.25 ,
+                        border="gray45" , col= unlist(col_ext))
+torta_int= floating.pie( 0.5,0.5,interior$porcent_abs , radius =0.2 ,
+                         border="white" , col=col_int ) 
+pie.labels( x =0.5 , y =0.5 , torta_ext , paste0 ( exterior$variedad, "\n" ,
+                                                   exterior$calidad , " % - " ,exterior$n , " ind. " ) ,
+            minangle =0.2 , radius =0.27 , cex =0.6 , font=1)
+pie.labels( x =0.5 , y =0.5 , torta_int, paste0( interior$calidad,"\n" ,
+                                                 interior$porcent_abs , " % - " , interior$n , " ind. " ) ,
+            minangle =0.2 , radius =0.09 , cex =0.6 , font=1)
+```
+
+## Discretización de las variables pH y Azúcar residual
+Se decidió utilizar las variables pH y azúcar residual para generar nuevas variables categóricas, ya que se encontró información relacionada a los valores y rangos esperados de fuentes especializadas en el tema. 
+
+### pH
+> El pH de la mayoría de los vinos se encuentra en el intervalo de 2,8 a 4, lo que lógicamente recae en el lado ácido de la escala. Un vino con un pH de 2,8 es extremadamente ácido mientras que uno con un pH en torno a 4 es plano, carente de acidez.
+
+[Info sobre pH](https://www.aprenderdevino.es/ph-y-vino/) 
+
+```{r}
+disc.ph = discretize(stratified_df$pH, method = 'fixed', breaks = c(2.74,3.14,3.25,3.36,4.5), labels = c('muy ácido', 'ácido', 'promedio', 'plano'))
+barplot(table(disc.ph))
+```
+
+### Azúcar residual
+> Muy secos < 1 g/l de azúcar
+<br/> Secos 1-5 g/l de azúcar
+<br/> Semi-secos 5-15 g/l de azúcar
+<br/> Abocados 15-30 g/l de azúcar
+<br/> Dulces 30-120 g/l de azúcar
+<br/> Muy dulces > 120 g/l de azúcar
+
+[Info sobre azúcar residual](https://www.thegrandwines.com/2018/02/08/clasificaciones-del-vino/) 
+
+```{r}
+disc.azucar = discretize(stratified_df$azúcar.residual, method = 'fixed', breaks = c(-Inf,1,5,15,30,120,+Inf), labels = c('Muy secos','Secos','Semi-secos','Abocados','Dulces','Muy dulces'))
+barplot(table(disc.azucar))
+```
+
+### Asociación entre las variables
+Con las categorías definidas se procede a realizar un test de independencia para identificar si existe alguna asociación. Para ello se utiliza el estadístivo Chi cuadrado con un nivel de significacia del 5%.
+
+Se plantea:
+
+H0: el valor de pH es independiente del nivel de azúcar residual.
+
+H1: las variables no son independientes 
+
+```{r}
+frec.azucar.ph = table(disc.azucar, disc.ph)
+frec.azucar.ph
+```
+
+Al observar las frecuencias, se descartan los casos "Dulces" y "Muy dulces", ya que no tienen datos y se procede a realizar el test.
+
+```{r}
+test.independencia = chisq.test(frec.azucar.ph[1:4,])
+test.independencia$p.value < 0.05
+```
+
+El p-valor obtenido es menor a 0.05, por lo que se rechaza H0 y se puede afirmar con un alto grado de certeza que existe una asociación entre ambas variables.
+
+## Diferencia de medias en ácido cítrico por variedad
+Para el análisis de diferencias de medias, se optó por la variable ácido cítrico, ya que anteriormente, durante el análisis exploratorio, se observó que podría existir una diferencia significativa entre ambas variedades
+
+```{r}
+with(stratified_df,boxplot(ácido.cítrico~variedad,boxcol=topo.colors(4),col=terrain.colors(4),main="Distribución de ácido cítrico por variedad",xlab="Variedad (blanco 1 / tinto 2)"))
+```
+
+Lo primero que realizamos fue el test de normalidad sobre las muestras para determinar si se cumplen con los supuestos y determinar cuál es el estadístico a aplicar
+
+### Normalidad en variedad blanco
+Obtenemos el subset de datos para la variedad 1 (vino blanco) y observamos su distribución
+```{r}
+acido.citrico.blanco = stratified_df[stratified_df$variedad == 1,]$ácido.cítrico
+summary(acido.citrico.blanco)
+```
+Ejecutamos el test de Shapiro y evaluamos el p-valor. En este test H0 indica que los datos son normales.
+```{r}
+shapiro.test.acido.citrico.blanco = shapiro.test(acido.citrico.blanco)
+shapiro.test.acido.citrico.blanco$p.value < 0.05
+```
+Observamos que el p-valor es menor a 0.05, por lo cual rechazamos H0 y confirmamos que los datos no cumplen con el principio de normalidad.
+
+### Normalidad en variedad tinto
+Obtenemos el subset de datos para la variedad 1 (vino blanco) y observamos su distribución
+```{r}
+acido.citrico.tinto = stratified_df[stratified_df$variedad == 2,]$ácido.cítrico
+summary(acido.citrico.tinto)
+```
+Corremos el test y evaluamos el p-valor.
+```{r}
+shapiro.test.acido.citrico.tinto = shapiro.test(acido.citrico.tinto)
+shapiro.test.acido.citrico.tinto$p.value < 0.05
+```
+En este caso, también comprobamos que no se cumple con el principio de normalidad
+
+Ya que no se cumplen los supuestos de normalidad debemos optar por un test no paramétrico. En este caso aplicaremos Mann-Whitney-Wilcoxon, donde
+
+$\theta_A$ a la mediana poblacional (posición central) del ácido cítrico de vino blanco.
+
+$\theta_C$ a la mediana poblacional (posición central) del ácido cítrico de vino tinto.
+
+Hipótesis
+
+Ho $\theta_A = \theta_C$
+
+Ha $\theta_A \neq \theta_C$
+
+```{r}
+wilcox.test.acido.citrico.result = wilcox.test(acido.citrico.blanco, acido.citrico.tinto, alternative = "two.sided")
+wilcox.test.acido.citrico.result$p.value < 0.05
+```
+Con el resultado del test, concluimos que rechazamos la hipótesis de la igualdad de las medianas de las dos variedades.
+
+Adicionalmente, se probó con el test de medianas para corroborar el resultado de Mann-Whitney-Wilcoxon
+
+```{r}
+mood.medtest.acido.citrico.result =  mood.medtest(ácido.cítrico~variedad, data=stratified_df)
+mood.medtest.acido.citrico.result$p.value < 0.05
+```
+Con el resultado del test, corroboramos el rechazo de la hipótesis Ho de la igualdad de las medianas de las dos variedades.
+
+## Análisis de la calidad respecto a las variedades
+Ahora vamos a evaluar si existen diferencias significativas en la calidad del vino tinto respecto al vino blanco. Esto lo vamos a interpretar como que la media de calidad del vino tinto es mayor que la media del vino blanco. 
+
+Empecemos viendo nuevamente los bloxplots de ambas variedades
+```{r}
+barplot(table(stratified_df$variedad,stratified_df$calidad),col=rainbow(11),main="Distribución de calidad según la variedad")
+legend("topright",cex=1,title="Variedad",c("blanco","tinto"),fill=rainbow(11),horiz=T)
+
+mosaicplot(table(stratified_df$calidad,stratified_df$variedad),col=terrain.colors(7:11),main="Calidad de vinos por variedad",ylab="Variedad (blanco 1 / tinto 2)",xlab="Calidad (0 - muy malo y 10 - excelente)")
+
+boxplot(stratified_df$calidad~stratified_df$variedad, xlab="Variedad (blanco 1 / tinto 2)", ylab="Calidad",boxcol=topo.colors(4),col=terrain.colors(4))
+```
+
+A simple vista no parece haber diferencias, pero realizaremos una diferencia de medias para corroborar la hipótesis
+
+Planteo la hipótesis:
+
+Ho: $\mu_{blanco} - \mu_{tinto} \le 0$
+
+Ha: $\mu_{tinto} - \mu_{blanco} > 0$
+
+Verifico los supuestos de normalidad:
+```{r}
+calidad.blanco = stratified_df[stratified_df$variedad == 1,]$calidad
+shapiro.test.calidad.blanco = shapiro.test(calidad.blanco)
+shapiro.test.calidad.blanco$p.value < 0.05
+```
+
+```{r}
+calidad.tinto = stratified_df[stratified_df$variedad == 2,]$calidad
+shapiro.test.calidad.tinto = shapiro.test(calidad.tinto)
+shapiro.test.calidad.tinto$p.value < 0.05
+```
+Ninguna de las variables cumple con el prinicipio de normalidad, por lo que nuevamente recurrimos al test no paramétrico de Mann-Whitney-Wilcoxon
+
+```{r}
+wilcox.test.calidad.result = wilcox.test(x=calidad.blanco, y=calidad.tinto, alternative = "greater")
+wilcox.test.calidad.result$p.value < 0.05
+```
+El test nos indica que podemos rechazar Ho, por lo cual vemos que existen evidencias para indicar que la calidad del vino tinto es mayor que la del vino blanco.
+
+## ANOVA: proporciones de alcohol en la calidad de los vinos
+A continuación, realizaremos un análisis sobre la proporción de alcohol según la calidad del vino. Para ello generaremos 3 categorías para la calidad: baja, media y alta
+
+```{r}
+barplot(table(stratified_df$calidad))
+
+stratified_df['calidad.disc'] = discretize(stratified_df$calidad, method = 'fixed', breaks = c(-Inf,5,7,+Inf), labels = c('Baja','Media','Alta'))
+```
+
+### Nueva variable categórica:
+```{r}
+barplot(table(stratified_df['calidad.disc']))
+with(stratified_df,boxplot(alcohol~calidad.disc,boxcol=topo.colors(5),col=terrain.colors(5),main="Distribución de alcohol por variedad",xlab="Calidad",ylab="Alcohol"))
+```
+
+### Test de ANOVA
+
+Ejecutamos el test de ANOVA y observamos los resultados obtenidos, para luego analizar los residuos
+```{r}
+anova.alcohol.calidad = aov(alcohol ~ factor(calidad.disc), data=stratified_df)
+summary(anova.alcohol.calidad)
+anova.alcohol.calidad
+```
+
+### Supuestos
+- Las muestras deben ser aleatorias y las observaciones independientes
+- Las varianzas de las subpoblaciones deben ser iguales (homocedasticidad)
+- La distribución de cada subpoblación es normal
+
+#### Análisis de residuos
+```{r}
+e<-resid(anova.alcohol.calidad) # residuos
+re<-rstandard(anova.alcohol.calidad) #residuos estandarizados
+pre<-predict(anova.alcohol.calidad) #predichos
+res<-cbind(stratified_df$calidad.disc,stratified_df$alcohol,pre,e,round(re,2))
+colnames(res)<-c("Calidad Vino", "Alcohol", "Predichos", "Residuos", "residuos std") 
+
+res<-as.data.frame(res)
+par(mfrow = c(1, 2))
+plot(pre, re, xlab="Predichos", ylab="Residuos estandarizados",main="Grafico de dispersion de RE vs PRED" )
+abline(0,0)
+qqnorm(e)
+qqline(e)
+```
+#### Normalidad de residuos
+Para determinar la normalidad de las variables, podemos analizar la normalidad de los residuos y obtener una conclusión de ahí
+```{r}
+shapiro.test.residuos = shapiro.test(e)
+shapiro.test.residuos$p.value < 0.05
+shapiro.test.residuos.std = shapiro.test(re) 
+shapiro.test.residuos.std$p.value < 0.05
+```
+
+Rechazamos la normalidad de los alguna de las variables, por lo que el resultado de ANOVA no puede ser considerado como verdadero. Es necesario implementar un test no paramétrico y en este caso utilizaremos Kruscal-Wallis
+
+
+#### Kruscal-Wallis
+Planteamos las hipótesis:
+
+Ho: Los tres grupos tienen la misma posición para la variable de estudio
+
+Ha: al menos un grupo tiene diferente posición para la variable en estudio
+
+Generamos las nuevas variables de estudio, alcohol según la categoría de calidad y ejecutamos el test
+
+```{r}
+alcohol.calidad.baja = stratified_df[stratified_df$calidad.disc=="Baja",]$alcohol
+alcohol.calidad.media = stratified_df[stratified_df$calidad.disc=="Media",]$alcohol
+alcohol.calidad.alta = stratified_df[stratified_df$calidad.disc=="Alta",]$alcohol
+
+shapiro.test(alcohol.calidad.baja)
+shapiro.test(alcohol.calidad.media)
+shapiro.test(alcohol.calidad.alta)
+
+kruskal.test(stratified_df$alcohol~stratified_df$calidad.disc)
+kruskalmc(stratified_df$alcohol~stratified_df$calidad.disc)
+```
+
+El resultado del test nos indica que se rechaza Ho, por lo tanto existe diferencia en las medias de las variables de estudio y adicionalmente podemos ver en donde se observan las diferencias. El test nos muestra que la diferencia se da entre los vinos de categoría alta y el resto.
+
+## Conclusiones
+Se trabajó con una base de datos que no presenta datos faltantes ni documentación adicional sobre las características de las variables, su significado o método de obtención, por lo que se realizaron exploraciones para entender la distribución y comportamiento de cada una de las variables, observando en algunos casos valores atícos al compararlos con la variable resultante (variedad), pero se desconoce si son outliers o errores de medición, ya que no se cuenta con el conocimiento suficiente del ámbito de estudio. 
+Un problema con el que me encontré al aplicar los estadísticos y test, es que las variables no presentan o cumplen con el principio de normalidad, por lo que se tuvo que recurrir a los test no parámetricos y no se pudo experimentar con todas las variedades de test, sin embargo, fue interesante poder corroborar y verificar los supuestos y pensar las hipótesis para cada test, las cuales tuve que hacer 2 veces al repasar los resultados y encontrar inconsistencias. Espero haber llegado a conclusiones coherentes.
+Continuando con el análisis de la base de datos, se observan variables que están asociadas entre sí, como el caso de alcohol y el azúcar residual. Sería interesante realizar un análisis multivariado para comprobar si están correlacionadas. 
+La tarea de discretizar o categorizar, no es simple, requiere conocer del tema y tener contexto de la variable que se está modificando, ya que agrupar o segmentar los valores incorrectamente produce que los resultados no sean adecuados al estudio o se realice una interpretación sesgada.
+Noté que la mayor dificultar, por lo menos lo sentí así, fue el trabajo exploratorio. Analizar, interpretar o conocer una variable solo por los valores recogidos en el dataset fue lo que más tiempo me demandó y aún siento que no entiendo los datos con los que estoy trabajando y piendo que podría haber obtenido mejores resultados o haber planteado experimentos o hipótesis más interesantes de haber conocido más sobre el tema de estudio.
